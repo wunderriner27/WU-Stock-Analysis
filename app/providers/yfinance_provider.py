@@ -61,7 +61,10 @@ class YFinanceProvider(MarketDataProvider):
         start = (datetime.now(timezone.utc) - timedelta(days=period_days + 320)).date()
 
         def fetch():
-            return yf.Ticker(symbol).history(start=str(start), interval="1d", auto_adjust=False)
+            # raise_errors: otherwise yfinance swallows network failures and returns an empty
+            # frame, which we would misreport as an unknown ticker (404).
+            return yf.Ticker(symbol).history(start=str(start), interval="1d", auto_adjust=False,
+                                             raise_errors=True)
 
         df = await call_with_resilience(fetch, ticker=symbol)
         if df is None or df.empty:
@@ -126,7 +129,7 @@ class YFinanceProvider(MarketDataProvider):
 
         df = await call_with_resilience(fetch, ticker=",".join(syms))
         out: dict[str, Quote] = {}
-        if df is None or df.empty:
+        if df is None or df.empty:  # all symbols unknown, or Yahoo unreachable: yf.download can't tell us which
             return out
         close = df["Close"] if "Close" in df else pd.DataFrame()
         vol = df["Volume"] if "Volume" in df else pd.DataFrame()

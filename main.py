@@ -75,10 +75,18 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _soft(coro, default, warnings: list[str], label: str):
-    """Await a non-critical section; on failure record a warning and degrade."""
+SOFT_DEADLINE = 20.0  # seconds; a slow optional section must not hold the whole page
+
+
+async def _soft(coro, default, warnings: list[str], label: str, deadline: float | None = None):
+    """Await a non-critical section; on failure or deadline record a warning and degrade."""
+    deadline = deadline or SOFT_DEADLINE
     try:
-        return await coro
+        return await asyncio.wait_for(coro, timeout=deadline)
+    except asyncio.TimeoutError:
+        log.warning("%s timed out after %.0fs", label, deadline)
+        warnings.append(f"{label} unavailable: timed out")
+        return default
     except Exception as exc:  # noqa: BLE001
         log.warning("%s unavailable: %s", label, exc)
         warnings.append(f"{label} unavailable: {getattr(exc, 'message', str(exc))}")
@@ -119,6 +127,9 @@ async def market_news(p: MarketDataProvider = Depends(provider)):
         _soft(p.get_quotes(all_syms), {}, warnings, "Index quotes"),
         _soft(p.get_movers(MOVERS_UNIVERSE, 8), {"gainers": [], "losers": []}, warnings, "Movers"),
     )
+
+    if not quotes_ and not any(w.startswith("Index quotes") for w in warnings):
+        warnings.append("Index quotes unavailable: no data returned")
 
     def rows(mapping):
         return [{**quotes_[s].to_dict(), "label": label} for s, label in mapping.items() if s in quotes_]
