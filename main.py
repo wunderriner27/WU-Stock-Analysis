@@ -128,6 +128,9 @@ async def market_news(p: MarketDataProvider = Depends(provider)):
         _soft(p.get_movers(MOVERS_UNIVERSE, 8), {"gainers": [], "losers": []}, warnings, "Movers"),
     )
 
+    if not quotes_ and not any(w.startswith("Index quotes") for w in warnings):
+        warnings.append("Index quotes unavailable: no data returned")
+
     def rows(mapping):
         return [{**quotes_[s].to_dict(), "label": label} for s, label in mapping.items() if s in quotes_]
 

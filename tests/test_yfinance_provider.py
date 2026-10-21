@@ -72,10 +72,10 @@ def test_batch_quotes(monkeypatch):
     assert q["MSFT"].change == pytest.approx(-2.0)
 
 
-def test_empty_batch_quotes_is_an_error(monkeypatch):
+def test_empty_batch_quotes_is_no_result(monkeypatch):
+    # yf.download returns an empty frame for unknown symbols, so this must not be a 5xx
     monkeypatch.setattr(yfp.yf, "download", lambda *a, **k: pd.DataFrame())
-    with pytest.raises(ProviderError):
-        asyncio.run(yfp.YFinanceProvider().get_quotes(["AAPL"]))
+    assert asyncio.run(yfp.YFinanceProvider().get_quotes(["ZZZZ"])) == {}
 
 
 def test_parse_news_new_and_legacy_schemas():

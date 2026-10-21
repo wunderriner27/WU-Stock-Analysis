@@ -99,6 +99,21 @@ def test_news_degrades_when_sections_fail(client, fake):
     assert len(body["warnings"]) == 2
 
 
+def test_quotes_for_unknown_symbols_is_empty_not_error(client):
+    r = client.get("/api/quotes", params={"symbols": "ZZZZ"})
+    assert r.status_code == 200
+    assert r.json()["quotes"] == {}
+
+
+def test_news_warns_when_quotes_come_back_empty(client, fake, monkeypatch):
+    async def empty(symbols):
+        return {}
+
+    monkeypatch.setattr(fake, "get_quotes", empty)
+    body = client.get("/api/news").json()
+    assert body["warnings"] == ["Index quotes unavailable: no data returned"]
+
+
 def test_news_slow_section_hits_deadline(client, fake, monkeypatch):
     monkeypatch.setattr(main, "SOFT_DEADLINE", 0.05)
 

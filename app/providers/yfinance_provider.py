@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 import yfinance as yf
 
-from ..errors import ProviderError, TickerNotFound
+from ..errors import TickerNotFound
 from ..resilience import cache, cached, call_with_resilience
 from .base import Fundamentals, MarketDataProvider, NewsItem, Quote
 
@@ -129,10 +129,8 @@ class YFinanceProvider(MarketDataProvider):
 
         df = await call_with_resilience(fetch, ticker=",".join(syms))
         out: dict[str, Quote] = {}
-        if df is None or df.empty:
-            # yf.download logs per-symbol failures instead of raising, so an empty frame for a
-            # whole batch almost always means Yahoo was unreachable rather than bad symbols.
-            raise ProviderError("Upstream returned no quotes for this batch.", ticker=",".join(syms))
+        if df is None or df.empty:  # all symbols unknown, or Yahoo unreachable: yf.download can't tell us which
+            return out
         close = df["Close"] if "Close" in df else pd.DataFrame()
         vol = df["Volume"] if "Volume" in df else pd.DataFrame()
         if isinstance(close, pd.Series):  # single symbol
