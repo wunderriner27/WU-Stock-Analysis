@@ -28,7 +28,7 @@ app/indicators.py               SMA/EMA/RSI/MACD/Bollinger, signals, performance
 app/sentiment.py                headline sentiment tagger
 app/econ_calendar.py            upcoming US macro events
 app/chat.py                     stock Q&A assistant (Claude + read-only tools over the provider)
-templates/index.html, static/app.js   frontend (static/chat.js = assistant panel)
+templates/index.html, static/app.js   frontend (watchlist is saved in browser localStorage; static/chat.js = assistant panel)
 ```
 
 ## API
