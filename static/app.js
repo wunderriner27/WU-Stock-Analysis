@@ -826,6 +826,7 @@
   function init() {
     wireChartControls();
     wireTrade();
+    window.addEventListener('ai-trader:order', () => loadTrade({ silent: true })); // static/ai_trader.js
     loadTradeStatus();
     $('ticker-form').addEventListener('submit', (e) => { e.preventDefault(); go($('ticker-input').value); });
     $('quick-search').addEventListener('submit', (e) => { e.preventDefault(); go($('quick-input').value); $('quick-input').value = ''; $('quick-input').blur(); });

@@ -6,3 +6,4 @@ pandas>=2.1
 numpy>=1.26
 python-dotenv>=1.0
 alpaca-py>=0.30
+anthropic>=2.0
