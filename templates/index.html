@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Market Terminal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com/3.4.5"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'system-ui', 'sans-serif'], mono: ['"IBM Plex Mono"', 'ui-monospace', 'monospace'] },
+          colors: {
+            ink: { 950: '#07090d', 900: '#0b0f15', 850: '#10151d', 800: '#151b25', 700: '#1e2632', 600: '#2a3442', 500: '#3b4757' },
+            up: '#22c55e', down: '#ef4444', accent: '#f59e0b', link: '#38bdf8',
+          },
+        },
+      },
+    };
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
+  <style>
+    body { background:#07090d; }
+    .num { font-family:'IBM Plex Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+    .panel { background:#0b0f15; border:1px solid #1e2632; border-radius:6px; }
+    .panel-h { font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:#8b98a9; padding:8px 12px; border-bottom:1px solid #1e2632; display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    .tbl { width:100%; font-size:12px; border-collapse:collapse; }
+    .tbl th { text-align:left; font-weight:500; color:#6b7889; font-size:10px; letter-spacing:.08em; text-transform:uppercase; padding:6px 12px; border-bottom:1px solid #1e2632; background:#0d1219; position:sticky; top:0; }
+    .tbl td { padding:5px 12px; border-bottom:1px solid #151b25; }
+    .tbl tr:hover td { background:#10151d; }
+    .tbl td.r, .tbl th.r { text-align:right; }
+    .chip { display:inline-block; font-size:10px; padding:1px 6px; border-radius:3px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; }
+    .chip-bullish { background:rgba(34,197,94,.12); color:#4ade80; }
+    .chip-bearish { background:rgba(239,68,68,.12); color:#f87171; }
+    .chip-neutral, .chip-n\/a { background:rgba(148,163,184,.12); color:#94a3b8; }
+    .up { color:#22c55e; } .down { color:#ef4444; } .flat { color:#94a3b8; }
+    .tape-track { display:flex; width:max-content; animation: tape 60s linear infinite; }
+    .tape-wrap:hover .tape-track { animation-play-state: paused; }
+    @keyframes tape { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    @keyframes flashUp { from { background: rgba(34,197,94,.35);} to { background: transparent; } }
+    @keyframes flashDown { from { background: rgba(239,68,68,.35);} to { background: transparent; } }
+    .flash-up { animation: flashUp 1.2s ease-out; } .flash-down { animation: flashDown 1.2s ease-out; }
+    .skeleton { background: linear-gradient(90deg,#10151d 25%,#151b25 50%,#10151d 75%); background-size:200% 100%; animation: sk 1.4s infinite; border-radius:4px; }
+    @keyframes sk { from { background-position:200% 0; } to { background-position:-200% 0; } }
+    .seg button { padding:2px 8px; font-size:11px; color:#8b98a9; border-radius:3px; }
+    .seg button.active { background:#1e2632; color:#f8fafc; }
+    ::-webkit-scrollbar { width:8px; height:8px; } ::-webkit-scrollbar-thumb { background:#1e2632; border-radius:4px; }
+    @media (prefers-reduced-motion: reduce) { .tape-track { animation:none; } }
+  </style>
+</head>
+<body class="text-slate-200 font-sans antialiased min-h-screen">
+
+  <!-- ===== Header / Nav ===== -->
+  <header class="sticky top-0 z-30 bg-ink-950/95 backdrop-blur border-b border-ink-700">
+    <div class="flex items-center gap-4 px-4 h-11">
+      <a href="#/" class="flex items-center gap-2 shrink-0">
+        <span class="w-2 h-2 rounded-full bg-accent"></span>
+        <span class="font-semibold tracking-tight text-sm">MKT<span class="text-accent">TERM</span></span>
+      </a>
+      <nav class="flex gap-1 text-xs">
+        <a href="#/" data-nav="home" class="nav-link px-3 py-1 rounded">Home</a>
+        <a href="#/ticker" data-nav="ticker" class="nav-link px-3 py-1 rounded">Ticker Search</a>
+        <a href="#/trade" data-nav="trade" class="nav-link px-3 py-1 rounded flex items-center gap-1.5">Trade <span id="nav-mode" class="hidden text-[9px] font-semibold px-1 rounded"></span></a>
+      </nav>
+      <form id="quick-search" class="ml-auto flex items-center gap-1">
+        <input id="quick-input" list="ticker-suggestions" autocomplete="off" spellcheck="false"
+               class="num uppercase bg-ink-850 border border-ink-700 rounded px-2 py-1 text-xs w-28 sm:w-40 focus:outline-none focus:border-accent"
+               placeholder="Symbol ⏎" />
+      </form>
+      <div class="hidden md:flex items-center gap-3 text-[10px] text-slate-500 num">
+        <span id="market-clock"></span>
+        <span class="px-1.5 py-0.5 rounded bg-ink-800 uppercase">src: {{ provider }}</span>
+      </div>
+    </div>
+    <!-- Ticker tape -->
+    <div class="tape-wrap overflow-hidden border-t border-ink-800 bg-ink-900 h-7">
+      <div id="tape" class="tape-track h-full items-center text-xs num"></div>
+    </div>
+  </header>
+
+  <datalist id="ticker-suggestions">
+    <option value="AAPL">Apple</option><option value="MSFT">Microsoft</option><option value="NVDA">NVIDIA</option>
+    <option value="AMZN">Amazon</option><option value="GOOGL">Alphabet</option><option value="META">Meta</option>
+    <option value="TSLA">Tesla</option><option value="AMD">AMD</option><option value="SPY">S&P 500 ETF</option>
+    <option value="QQQ">Nasdaq 100 ETF</option><option value="JPM">JPMorgan</option><option value="NFLX">Netflix</option>
+  </datalist>
+
+  <div id="toast" class="fixed bottom-4 right-4 z-50 hidden max-w-sm panel px-4 py-3 text-xs border-down/50"></div>
+
+  <main class="p-3 md:p-4 max-w-[1680px] mx-auto">
+
+    <!-- ===================== HOME ===================== -->
+    <section id="view-home" class="hidden space-y-3">
+      <div id="home-warnings"></div>
+
+      <!-- Index strip -->
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-2" id="index-cards"></div>
+
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+        <!-- Left: news -->
+        <div class="xl:col-span-7 panel">
+          <div class="panel-h">
+            <span>Global Market News</span>
+            <span id="news-sentiment" class="normal-case tracking-normal flex gap-2"></span>
+          </div>
+          <div id="news-list" class="grid md:grid-cols-2 gap-px bg-ink-700/60 max-h-[1100px] overflow-y-auto"></div>
+        </div>
+
+        <!-- Right: movers + macro + calendar -->
+        <div class="xl:col-span-5 space-y-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div class="panel">
+              <div class="panel-h"><span>Top Gainers</span><span class="text-up">▲</span></div>
+              <table class="tbl"><thead><tr><th>Sym</th><th class="r">Last</th><th class="r">Chg%</th></tr></thead>
+                <tbody id="gainers"></tbody></table>
+            </div>
+            <div class="panel">
+              <div class="panel-h"><span>Top Losers</span><span class="text-down">▼</span></div>
+              <table class="tbl"><thead><tr><th>Sym</th><th class="r">Last</th><th class="r">Chg%</th></tr></thead>
+                <tbody id="losers"></tbody></table>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="panel-h"><span>Macro & Rates</span><span class="normal-case tracking-normal text-slate-600">daily close</span></div>
+            <table class="tbl"><thead><tr><th>Instrument</th><th class="r">Last</th><th class="r">Chg</th><th class="r">Chg%</th></tr></thead>
+              <tbody id="macro"></tbody></table>
+          </div>
+          <div class="panel">
+            <div class="panel-h"><span>Global Indices</span></div>
+            <table class="tbl"><thead><tr><th>Index</th><th class="r">Last</th><th class="r">Chg%</th></tr></thead>
+              <tbody id="global-indices"></tbody></table>
+          </div>
+          <div class="panel">
+            <div class="panel-h"><span>US Economic Calendar · next 21d</span><span class="normal-case tracking-normal text-slate-600">ET · ~ = est.</span></div>
+            <div class="max-h-80 overflow-y-auto">
+              <table class="tbl"><thead><tr><th>Date</th><th>Time</th><th>Event</th><th class="r">Impact</th></tr></thead>
+                <tbody id="calendar"></tbody></table>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="text-[10px] text-slate-600 num" id="home-updated"></p>
+    </section>
+
+    <!-- ===================== TICKER ===================== -->
+    <section id="view-ticker" class="hidden space-y-3">
+      <form id="ticker-form" class="panel p-3 flex flex-col sm:flex-row gap-2 sm:items-center">
+        <div class="relative flex-1">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">⌕</span>
+          <input id="ticker-input" list="ticker-suggestions" autocomplete="off" spellcheck="false"
+                 class="num uppercase w-full bg-ink-850 border border-ink-600 rounded pl-8 pr-3 py-2.5 text-lg tracking-wide focus:outline-none focus:border-accent"
+                 placeholder="Enter a ticker — AAPL, NVDA, SPY, BTC-USD…" />
+        </div>
+        <button class="bg-accent hover:bg-amber-400 text-ink-950 font-semibold text-sm px-6 py-2.5 rounded">Analyze</button>
+        <label class="flex items-center gap-1.5 text-[11px] text-slate-500 select-none">
+          <input type="checkbox" id="auto-submit" class="accent-amber-500" checked /> auto-submit
+        </label>
+      </form>
+
+      <div id="ticker-empty" class="panel p-10 text-center text-slate-500 text-sm">
+        Search a symbol to load price action, technicals, fundamentals and news.
+      </div>
+      <div id="ticker-error" class="hidden panel p-6 border-down/40"></div>
+
+      <div id="ticker-body" class="hidden space-y-3">
+        <div id="ticker-warnings"></div>
+
+        <!-- Hero -->
+        <div class="panel p-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div class="lg:col-span-5">
+            <div class="flex items-baseline gap-3 flex-wrap">
+              <h1 id="h-symbol" class="text-2xl font-bold num"></h1>
+              <span id="h-name" class="text-slate-400 text-sm truncate"></span>
+              <span id="h-exchange" class="text-[10px] uppercase px-1.5 py-0.5 rounded bg-ink-800 text-slate-400"></span>
+            </div>
+            <div class="flex items-baseline gap-4 mt-2 flex-wrap">
+              <span id="h-price" class="text-4xl font-semibold num rounded px-1 -mx-1"></span>
+              <span id="h-change" class="text-lg num font-medium"></span>
+            </div>
+            <div id="h-meta" class="text-[11px] text-slate-500 mt-1 num"></div>
+            <a id="h-trade" href="#/trade" class="hidden mt-2 inline-block text-[11px] px-3 py-1 rounded border border-accent/50 text-accent hover:bg-accent/10">Trade this symbol →</a>
+          </div>
+          <div class="lg:col-span-4">
+            <div class="text-[10px] uppercase tracking-widest text-slate-500 mb-2">Bid / Ask</div>
+            <div class="grid grid-cols-3 gap-2 num">
+              <div class="bg-up/10 border border-up/20 rounded p-2">
+                <div class="text-[10px] text-up/80">BID</div>
+                <div id="h-bid" class="text-lg text-up"></div>
+                <div id="h-bidsz" class="text-[10px] text-slate-500"></div>
+              </div>
+              <div class="bg-ink-800 border border-ink-700 rounded p-2 text-center">
+                <div class="text-[10px] text-slate-400">SPREAD</div>
+                <div id="h-spread" class="text-lg"></div>
+                <div id="h-spreadbps" class="text-[10px] text-slate-500"></div>
+              </div>
+              <div class="bg-down/10 border border-down/20 rounded p-2 text-right">
+                <div class="text-[10px] text-down/80">ASK</div>
+                <div id="h-ask" class="text-lg text-down"></div>
+                <div id="h-asksz" class="text-[10px] text-slate-500"></div>
+              </div>
+            </div>
+            <div class="mt-2 h-1.5 rounded bg-ink-800 overflow-hidden flex" title="Bid/Ask size imbalance">
+              <div id="h-imb-bid" class="bg-up/70 h-full"></div><div id="h-imb-ask" class="bg-down/70 h-full flex-1"></div>
+            </div>
+          </div>
+          <div class="lg:col-span-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs num content-start" id="h-stats"></div>
+        </div>
+
+        <!-- Charts -->
+        <div class="panel">
+          <div class="panel-h">
+            <div class="flex items-center gap-3 flex-wrap">
+              <span>Price · Daily</span>
+              <div class="seg flex gap-0.5 bg-ink-850 rounded p-0.5" id="chart-type">
+                <button data-type="candlestick" class="active">Candles</button><button data-type="line">Line</button>
+              </div>
+              <div class="seg flex gap-0.5 bg-ink-850 rounded p-0.5" id="chart-range">
+                <button data-range="21">1M</button><button data-range="63">3M</button><button data-range="126" class="active">6M</button><button data-range="9999">1Y</button>
+              </div>
+            </div>
+            <div class="flex items-center gap-3 normal-case tracking-normal text-[11px]" id="overlay-toggles">
+              <label class="flex items-center gap-1"><input type="checkbox" data-ov="sma20" checked class="accent-sky-400"><span class="text-sky-400">SMA20</span></label>
+              <label class="flex items-center gap-1"><input type="checkbox" data-ov="sma50" checked class="accent-amber-500"><span class="text-amber-400">SMA50</span></label>
+              <label class="flex items-center gap-1"><input type="checkbox" data-ov="sma200" class="accent-fuchsia-400"><span class="text-fuchsia-400">SMA200</span></label>
+              <label class="flex items-center gap-1"><input type="checkbox" data-ov="bb" class="accent-slate-400"><span class="text-slate-400">BBands</span></label>
+            </div>
+          </div>
+          <div class="p-2">
+            <div class="relative h-[380px]"><canvas id="price-chart"></canvas></div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+              <div>
+                <div class="text-[10px] uppercase tracking-widest text-slate-500 px-1 flex justify-between"><span>RSI (14)</span><span id="rsi-last" class="num"></span></div>
+                <div class="relative h-[150px]"><canvas id="rsi-chart"></canvas></div>
+              </div>
+              <div>
+                <div class="text-[10px] uppercase tracking-widest text-slate-500 px-1 flex justify-between"><span>MACD (12, 26, 9)</span><span id="macd-last" class="num"></span></div>
+                <div class="relative h-[150px]"><canvas id="macd-chart"></canvas></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Matrix -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-3">
+          <div class="panel">
+            <div class="panel-h"><span>Technical Signals</span><span id="tech-score" class="normal-case tracking-normal"></span></div>
+            <table class="tbl"><thead><tr><th>Indicator</th><th class="r">Value</th><th>Signal</th><th>Read</th></tr></thead>
+              <tbody id="tech-table"></tbody></table>
+            <div class="panel-h border-t border-ink-700"><span>Performance & Risk</span></div>
+            <table class="tbl"><tbody id="perf-table"></tbody></table>
+          </div>
+
+          <div class="panel">
+            <div class="panel-h"><span>Fundamentals & Valuation</span><span id="f-sector" class="normal-case tracking-normal text-slate-500 truncate"></span></div>
+            <table class="tbl"><tbody id="fund-table"></tbody></table>
+            <div class="panel-h border-t border-ink-700"><span>Analyst Consensus</span><span id="an-rating"></span></div>
+            <div class="p-3 space-y-3" id="analyst"></div>
+          </div>
+
+          <div class="panel lg:col-span-2 2xl:col-span-1">
+            <div class="panel-h"><span>Ticker News Headlines</span><span id="tn-count" class="normal-case tracking-normal text-slate-500"></span></div>
+            <div class="max-h-[760px] overflow-y-auto">
+              <table class="tbl"><thead><tr><th>Headline</th><th>Tone</th><th class="r">Age</th></tr></thead>
+                <tbody id="ticker-news"></tbody></table>
+            </div>
+          </div>
+        </div>
+        <p class="text-[10px] text-slate-600 num" id="ticker-updated"></p>
+      </div>
+    </section>
+
+    <!-- ===================== TRADE ===================== -->
+    <section id="view-trade" class="hidden space-y-3">
+      <div id="trade-disabled" class="hidden panel p-8 text-center text-sm text-slate-400"></div>
+
+      <div id="trade-body" class="hidden space-y-3">
+        <div id="mode-banner"></div>
+        <div id="trade-warnings"></div>
+
+        <!-- Account strip -->
+        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2" id="acct-cards"></div>
+
+        <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+          <!-- Order ticket -->
+          <form id="ticket" class="xl:col-span-4 panel self-start" autocomplete="off">
+            <div class="panel-h"><span>Order Ticket</span><span id="ticket-mode" class="normal-case tracking-normal"></span></div>
+            <div class="p-3 space-y-3">
+              <div>
+                <label class="text-[10px] uppercase tracking-widest text-slate-500">Symbol</label>
+                <input id="t-symbol" list="ticker-suggestions" spellcheck="false" required
+                       class="num uppercase w-full mt-1 bg-ink-850 border border-ink-600 rounded px-3 py-2 text-lg focus:outline-none focus:border-accent" placeholder="AAPL" />
+                <div id="t-quote" class="mt-2 text-xs num text-slate-500 min-h-[36px]"></div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-1 p-1 bg-ink-850 rounded" id="t-side">
+                <button type="button" data-side="buy" class="py-2 rounded text-sm font-semibold">Buy</button>
+                <button type="button" data-side="sell" class="py-2 rounded text-sm font-semibold">Sell</button>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-[10px] uppercase tracking-widest text-slate-500">Quantity</label>
+                  <input id="t-qty" type="number" min="0" step="any" value="1" required
+                         class="num w-full mt-1 bg-ink-850 border border-ink-600 rounded px-3 py-2 focus:outline-none focus:border-accent" />
+                </div>
+                <div>
+                  <label class="text-[10px] uppercase tracking-widest text-slate-500">Order type</label>
+                  <select id="t-type" class="w-full mt-1 bg-ink-850 border border-ink-600 rounded px-2 py-2 text-sm focus:outline-none focus:border-accent">
+                    <option value="market">Market</option><option value="limit">Limit</option>
+                  </select>
+                </div>
+                <div id="t-limit-wrap" class="hidden">
+                  <label class="text-[10px] uppercase tracking-widest text-slate-500">Limit price</label>
+                  <input id="t-limit" type="number" min="0" step="0.01"
+                         class="num w-full mt-1 bg-ink-850 border border-ink-600 rounded px-3 py-2 focus:outline-none focus:border-accent" />
+                </div>
+                <div>
+                  <label class="text-[10px] uppercase tracking-widest text-slate-500">Time in force</label>
+                  <select id="t-tif" class="w-full mt-1 bg-ink-850 border border-ink-600 rounded px-2 py-2 text-sm focus:outline-none focus:border-accent">
+                    <option value="day">Day</option><option value="gtc">Good 'til cancelled</option>
+                  </select>
+                </div>
+              </div>
+
+              <table class="tbl text-xs"><tbody id="t-summary"></tbody></table>
+              <div id="t-error" class="hidden text-xs text-down"></div>
+              <button id="t-submit" class="w-full py-2.5 rounded font-semibold text-sm text-ink-950 disabled:opacity-40 disabled:cursor-not-allowed">Review order</button>
+            </div>
+          </form>
+
+          <div class="xl:col-span-8 space-y-3">
+            <div class="panel">
+              <div class="panel-h"><span>Positions</span><span id="pos-total" class="normal-case tracking-normal num"></span></div>
+              <div class="overflow-x-auto">
+                <table class="tbl"><thead><tr><th>Symbol</th><th class="r">Qty</th><th class="r">Avg entry</th><th class="r">Last</th><th class="r">Mkt value</th><th class="r">Today</th><th class="r">Unrealized P/L</th><th></th></tr></thead>
+                  <tbody id="positions"></tbody></table>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-h">
+                <span>Orders</span>
+                <div class="seg flex gap-0.5 bg-ink-850 rounded p-0.5 normal-case tracking-normal" id="order-filter">
+                  <button data-status="open">Open</button><button data-status="closed">Closed</button><button data-status="all" class="active">All</button>
+                </div>
+              </div>
+              <div class="overflow-x-auto max-h-[480px] overflow-y-auto">
+                <table class="tbl"><thead><tr><th>Submitted</th><th>Symbol</th><th>Side</th><th class="r">Qty</th><th>Type</th><th class="r">Limit</th><th class="r">Filled</th><th class="r">Avg fill</th><th>Status</th><th></th></tr></thead>
+                  <tbody id="orders"></tbody></table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="text-[10px] text-slate-600 num" id="trade-updated"></p>
+      </div>
+    </section>
+  </main>
+
+  <!-- Confirm dialog (orders, cancels, closes) -->
+  <dialog id="confirm" class="panel p-0 text-slate-200 w-[92vw] max-w-md backdrop:bg-black/70">
+    <form method="dialog">
+      <div class="panel-h"><span id="c-title">Confirm</span></div>
+      <div id="c-body" class="p-4 text-sm space-y-2"></div>
+      <div class="flex gap-2 justify-end p-3 border-t border-ink-700">
+        <button value="cancel" class="px-4 py-1.5 text-sm rounded bg-ink-700 hover:bg-ink-600">Back</button>
+        <button value="ok" id="c-ok" class="px-4 py-1.5 text-sm rounded font-semibold text-ink-950">Confirm</button>
+      </div>
+    </form>
+  </dialog>
+
+  <footer class="px-4 py-3 text-[10px] text-slate-600 border-t border-ink-800">
+    Data for informational purposes only, may be delayed. Not investment advice.
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
