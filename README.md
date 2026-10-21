@@ -12,6 +12,13 @@ pip install -r requirements.txt
 uvicorn main:app --reload --reload-exclude .venv --port 8000
 ```
 
+Run the tests (offline; a fake provider stands in for Yahoo/Alpaca):
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
 Open http://localhost:8000. Routes: `#/` (home) and `#/ticker/AAPL`. Press `/` to focus search.
 
 ## Layout
@@ -28,6 +35,7 @@ app/indicators.py               SMA/EMA/RSI/MACD/Bollinger, signals, performance
 app/sentiment.py                headline sentiment tagger
 app/econ_calendar.py            upcoming US macro events
 templates/index.html, static/app.js   frontend
+tests/                          pytest suite (indicators, resilience, provider error mapping, routes)
 ```
 
 ## API

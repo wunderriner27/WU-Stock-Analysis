@@ -75,10 +75,18 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def _soft(coro, default, warnings: list[str], label: str):
-    """Await a non-critical section; on failure record a warning and degrade."""
+SOFT_DEADLINE = 20.0  # seconds; a slow optional section must not hold the whole page
+
+
+async def _soft(coro, default, warnings: list[str], label: str, deadline: float | None = None):
+    """Await a non-critical section; on failure or deadline record a warning and degrade."""
+    deadline = deadline or SOFT_DEADLINE
     try:
-        return await coro
+        return await asyncio.wait_for(coro, timeout=deadline)
+    except asyncio.TimeoutError:
+        log.warning("%s timed out after %.0fs", label, deadline)
+        warnings.append(f"{label} unavailable: timed out")
+        return default
     except Exception as exc:  # noqa: BLE001
         log.warning("%s unavailable: %s", label, exc)
         warnings.append(f"{label} unavailable: {getattr(exc, 'message', str(exc))}")
