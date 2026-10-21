@@ -51,6 +51,34 @@ Trading endpoints need Alpaca (501 otherwise). The Trade tab (`#/trade`, or `#/t
 confirmation before every order, cancel and close, and warns when a sell would open a short position.
 On a live account, orders are refused unless `ALPACA_ALLOW_LIVE_TRADING=yes`.
 
+## AI trader (Trade tab)
+
+The Trade tab has an **AI Trader** panel: type a request ("find a good entry on NVDA", "review my portfolio
+and trim anything overextended"), optionally with a focus symbol. Claude reads the quote, indicator signals,
+performance, headlines, your account and positions, and proposes concrete orders with its reasoning.
+
+- **Nothing is placed automatically.** Each proposal has a *Review & place* button that opens the same
+  confirmation dialog as manual orders. Proposals are single-use and expire after 15 minutes.
+- **Limits are enforced on the server**, at proposal time and again just before the order is sent, whatever
+  Claude suggests. Proposals that break one are shown as blocked with the reason.
+- **Paper only by default.** On a LIVE Alpaca account, AI orders also need `AI_TRADER_ALLOW_LIVE=yes`
+  (on top of `ALPACA_ALLOW_LIVE_TRADING=yes`); otherwise you get proposals only.
+
+Settings (`.env`):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | (required) | Claude API key |
+| `AI_TRADER_MAX_ORDER_USD` | `1000` | Max estimated value of one AI order |
+| `AI_TRADER_MAX_POSITION_PCT` | `10` | Max size of a position after a buy, as % of equity |
+| `AI_TRADER_MAX_ORDERS_PER_DAY` | `5` | AI orders per market day (counter resets on server restart) |
+| `AI_TRADER_ALLOW_SHORTS` | `no` | `yes` lets AI sells exceed the shares you hold |
+| `AI_TRADER_ALLOW_LIVE` | `no` | `yes` allows AI orders on a live account |
+| `AI_TRADER_MODEL` / `AI_TRADER_EFFORT` | `claude-opus-5-5` / `high` | Model and effort level |
+
+Endpoints: `GET /api/ai-trader/status`, `POST /api/ai-trader/propose`, `POST /api/ai-trader/proposals/{id}/execute`,
+`DELETE /api/ai-trader/proposals/{id}`. Code: `app/ai_trader.py`, `static/ai_trader.js`; tests: `pytest tests`.
+
 Non-critical sections (fundamentals, news, live quote) degrade to a `warnings[]` entry instead of failing the request.
 
 ## Stock assistant
