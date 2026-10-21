@@ -302,6 +302,22 @@
         <!-- Account strip -->
         <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2" id="acct-cards"></div>
 
+        <!-- AI trader: Claude proposes, you confirm each order (static/ai_trader.js) -->
+        <div class="panel" id="ai-trader">
+          <div class="panel-h"><span>AI Trader · Claude</span><span id="ai-mode" class="normal-case tracking-normal"></span></div>
+          <div class="p-3 space-y-3">
+            <form id="ai-form" class="flex flex-col md:flex-row gap-2" autocomplete="off">
+              <input id="ai-symbol" list="ticker-suggestions" spellcheck="false" placeholder="Symbol (optional)"
+                     class="num uppercase md:w-40 bg-ink-850 border border-ink-600 rounded px-3 py-2 text-sm focus:outline-none focus:border-accent" />
+              <input id="ai-instruction" required maxlength="1500" placeholder="e.g. Find a good entry on this stock, or review my portfolio and trim anything overextended"
+                     class="flex-1 bg-ink-850 border border-ink-600 rounded px-3 py-2 text-sm focus:outline-none focus:border-accent" />
+              <button id="ai-submit" class="bg-accent hover:bg-amber-400 text-ink-950 font-semibold text-sm px-5 py-2 rounded disabled:opacity-40">Ask Claude</button>
+            </form>
+            <div id="ai-limits" class="text-[11px] text-slate-500 num"></div>
+            <div id="ai-result" class="space-y-3"></div>
+          </div>
+        </div>
+
         <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
           <!-- Order ticket -->
           <form id="ticket" class="xl:col-span-4 panel self-start" autocomplete="off">
@@ -394,5 +410,6 @@
   </footer>
 
   <script src="/static/app.js"></script>
+  <script src="/static/ai_trader.js"></script>
 </body>
 </html>
