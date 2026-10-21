@@ -25,8 +25,6 @@ from app.providers import get_provider
 
 log = logging.getLogger("dashboard.chat")
 
-MODEL = os.getenv("CHAT_MODEL", "claude-opus-5-5")
-EFFORT = os.getenv("CHAT_EFFORT", "medium")  # low | medium | high | xhigh | max
 MAX_TOOL_ROUNDS = 8
 MAX_HISTORY = 20
 TICKER_RE = re.compile(r"^[A-Z0-9.\-^=]{1,15}$")
@@ -108,6 +106,15 @@ class ChatIn(BaseModel):
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+# Read at request time: main.py loads .env after importing this module.
+def model() -> str:
+    return os.getenv("CHAT_MODEL", "claude-opus-5-5")
+
+
+def effort() -> str:
+    return os.getenv("CHAT_EFFORT", "medium")  # low | medium | high | xhigh | max
 
 
 def enabled() -> bool:
@@ -221,7 +228,7 @@ def build_router(*, tape: list[str], groups: dict[str, dict[str, str]], movers_u
     async def chat_status():
         if not enabled():
             return {"enabled": False, "reason": "Add ANTHROPIC_API_KEY to .env to enable the assistant."}
-        return {"enabled": True, "model": MODEL}
+        return {"enabled": True, "model": model()}
 
     @router.post("/api/chat")
     async def chat(body: ChatIn):
@@ -242,12 +249,12 @@ def build_router(*, tape: list[str], groups: dict[str, dict[str, str]], movers_u
         try:
             for _ in range(MAX_TOOL_ROUNDS):
                 resp = await client().beta.messages.create(
-                    model=MODEL,
+                    model=model(),
                     max_tokens=16000,
                     system=system,
                     tools=TOOLS,
                     messages=messages,
-                    output_config={"effort": EFFORT},
+                    output_config={"effort": effort()},
                     betas=["server-side-fallback-2026-07-01"],
                     fallbacks="default",
                 )
@@ -278,6 +285,6 @@ def build_router(*, tape: list[str], groups: dict[str, dict[str, str]], movers_u
             raise HTTPException(504, "Could not reach the Claude API")
 
         return {"reply": "That took more lookups than I allow per question. Try narrowing it down.",
-                "tools_used": tools_used, "model": MODEL}
+                "tools_used": tools_used, "model": model()}
 
     return router
