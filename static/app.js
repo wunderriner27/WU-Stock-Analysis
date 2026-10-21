@@ -119,6 +119,102 @@
     } catch (e) { /* tape is non-critical */ }
   }
 
+  // ------------------------------------------------------------------ watchlist
+  // Kept in this browser's localStorage; quotes come from the batch /api/quotes route.
+  const WL_KEY = 'mkt.watchlist';
+  const WL_DEFAULT = ['AAPL', 'MSFT', 'NVDA', 'AMZN', 'SPY'];
+  const wl = {
+    syms: (() => {
+      try {
+        const v = JSON.parse(localStorage.getItem(WL_KEY));
+        return Array.isArray(v) ? v.filter((s) => typeof s === 'string').slice(0, 50) : WL_DEFAULT.slice();
+      } catch { return WL_DEFAULT.slice(); }
+    })(),
+    quotes: {},
+    prev: {},
+  };
+  const wlSave = () => { try { localStorage.setItem(WL_KEY, JSON.stringify(wl.syms)); } catch { /* private mode */ } };
+  const wlHas = (s) => wl.syms.includes(s);
+
+  function wlToggle(sym, on = !wlHas(sym)) {
+    if (on && !wlHas(sym)) {
+      if (wl.syms.length >= 50) return toast('Watchlist is full (50 symbols)');
+      wl.syms.push(sym);
+    } else if (!on) {
+      wl.syms = wl.syms.filter((s) => s !== sym);
+    }
+    wlSave();
+    renderWatchlist();
+    renderWatchButton();
+    if (on) refreshWatchlist();
+  }
+
+  function renderWatchlist() {
+    const row = (s) => {
+      const q = wl.quotes[s];
+      const dg = priceDigits(q?.price);
+      const flash = q && isNum(wl.prev[s]) && q.price !== wl.prev[s] ? (q.price > wl.prev[s] ? 'flash-up' : 'flash-down') : '';
+      return `<tr data-sym="${esc(s)}" class="cursor-pointer">
+        <td><a href="#/ticker/${encodeURIComponent(s)}" class="text-link font-semibold num">${esc(s)}</a>${q?.name ? `<div class="text-[10px] text-slate-500 truncate max-w-[140px]">${esc(q.name)}</div>` : ''}</td>
+        <td class="r num ${flash}">${q ? fmt(q.price, dg) : '<span class="text-slate-600">…</span>'}</td>
+        <td class="r num ${dir(q?.change)}">${fmtChg(q?.change, dg)}</td>
+        <td class="r num ${dir(q?.change_pct)}">${fmtPct(q?.change_pct)}</td>
+        <td class="r num text-slate-400">${fmtBig(q?.volume)}</td>
+        <td class="r"><button data-wl-remove="${esc(s)}" title="Remove ${esc(s)}" class="text-slate-600 hover:text-down px-1">×</button></td></tr>`;
+    };
+    $('watchlist').innerHTML = wl.syms.length
+      ? wl.syms.map(row).join('')
+      : '<tr><td colspan="6" class="text-slate-500 text-center py-4">Empty. Add a symbol above, or press ☆ on any ticker page.</td></tr>';
+
+    const current = state.data?.symbol;
+    $('wl-strip').innerHTML = wl.syms.map((s) => {
+      const q = wl.quotes[s];
+      const on = s === current;
+      return `<a href="#/ticker/${encodeURIComponent(s)}" class="shrink-0 flex items-center gap-1.5 px-2 py-1 rounded border ${on ? 'border-accent/60 bg-ink-800' : 'border-ink-700 bg-ink-900 hover:bg-ink-800'}">
+        <span class="font-semibold ${on ? 'text-white' : 'text-slate-300'}">${esc(s)}</span>
+        <span class="${dir(q?.change_pct)}">${fmtPct(q?.change_pct)}</span></a>`;
+    }).join('');
+  }
+
+  function renderWatchButton() {
+    const s = state.data?.symbol;
+    const b = $('h-watch');
+    if (!s) return;
+    const on = wlHas(s);
+    b.textContent = on ? '★ Watching' : '☆ Watch';
+    b.classList.toggle('text-accent', on); b.classList.toggle('border-accent/60', on);
+  }
+
+  async function refreshWatchlist() {
+    if (!wl.syms.length) return renderWatchlist();
+    try {
+      const d = await api(`/api/quotes?symbols=${encodeURIComponent(wl.syms.join(','))}`, { retries: 1 });
+      for (const s of wl.syms) wl.prev[s] = wl.quotes[s]?.price;
+      Object.assign(wl.quotes, d.quotes);
+    } catch (e) { /* keep last quotes; watchlist is non-critical */ }
+    renderWatchlist();
+  }
+
+  function wireWatchlist() {
+    $('wl-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const s = $('wl-input').value.trim().toUpperCase();
+      if (!s) return;
+      if (!/^[A-Z0-9.\-^=]{1,15}$/.test(s)) return toast(`“${s}” is not a valid ticker format`);
+      $('wl-input').value = '';
+      if (wlHas(s)) return toast(`${s} is already on the watchlist`, 'ok');
+      wlToggle(s, true);
+    });
+    $('watchlist').addEventListener('click', (e) => {
+      const rm = e.target.closest('[data-wl-remove]');
+      if (rm) { e.preventDefault(); return wlToggle(rm.dataset.wlRemove, false); }
+      const tr = e.target.closest('tr[data-sym]');
+      if (tr && !e.target.closest('a')) location.hash = `#/ticker/${encodeURIComponent(tr.dataset.sym)}`;
+    });
+    $('h-watch').addEventListener('click', () => state.data && wlToggle(state.data.symbol));
+    renderWatchlist();
+  }
+
   // ------------------------------------------------------------------ HOME
   async function loadHome() {
     const skel = (n, h = 'h-5') => Array(n).fill(`<tr><td colspan="4"><div class="skeleton ${h}"></div></td></tr>`).join('');
@@ -511,6 +607,7 @@
       const symbolChanged = state.data?.symbol !== d.symbol;
       state.data = d;
       renderHero(d, { flash: silent });
+      renderWatchButton(); renderWatchlist();
       if (!silent || symbolChanged) buildCharts();
       renderTechnicals(d);
       renderFundamentals(d);
@@ -826,6 +923,7 @@
   function init() {
     wireChartControls();
     wireTrade();
+    wireWatchlist();
     window.addEventListener('ai-trader:order', () => loadTrade({ silent: true })); // static/ai_trader.js
     loadTradeStatus();
     $('ticker-form').addEventListener('submit', (e) => { e.preventDefault(); go($('ticker-input').value); });
@@ -849,6 +947,7 @@
     window.addEventListener('hashchange', route);
     tickClock(); setInterval(tickClock, 1000);
     refreshTape(); setInterval(() => !document.hidden && refreshTape(), 30000);
+    refreshWatchlist(); setInterval(() => !document.hidden && refreshWatchlist(), 30000);
     route();
   }
 

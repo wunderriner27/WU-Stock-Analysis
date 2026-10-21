@@ -27,7 +27,7 @@ app/errors.py                   TickerNotFound (404) / RateLimited (429) / Provi
 app/indicators.py               SMA/EMA/RSI/MACD/Bollinger, signals, performance stats
 app/sentiment.py                headline sentiment tagger
 app/econ_calendar.py            upcoming US macro events
-templates/index.html, static/app.js   frontend
+templates/index.html, static/app.js   frontend (watchlist is saved in browser localStorage)
 ```
 
 ## API
