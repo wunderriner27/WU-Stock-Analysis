@@ -10,7 +10,7 @@
   const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
   const fmt = (v, d = 2) => (isNum(v) ? v.toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—');
 
-  const ai = { status: null, plan: null, busy: false, done: {} };
+  const ai = { status: null, plan: null, busy: false, done: {}, auto: null, autoBusy: false };
 
   /** POST/GET/DELETE JSON. Never retried: a retried execute could place an order twice. */
   async function call(path, method = 'GET', body) {
@@ -36,12 +36,12 @@
     }
   }
 
-  function confirmDialog(title, html, tone) {
+  function confirmDialog(title, html, tone, okText = 'Place order') {
     const dlg = $('confirm');
     $('c-title').textContent = title;
     $('c-body').innerHTML = html;
     const btn = $('c-ok');
-    btn.textContent = 'Place order';
+    btn.textContent = okText;
     btn.className = `px-4 py-1.5 text-sm rounded font-semibold text-ink-950 ${tone === 'buy' ? 'bg-up hover:bg-green-400' : 'bg-down hover:bg-red-400'}`;
     return new Promise((resolve) => {
       dlg.addEventListener('close', () => resolve(dlg.returnValue === 'ok'), { once: true });
@@ -159,20 +159,110 @@
     renderPlan();
   }
 
+
+  // ------------------------------------------------------------------ auto mode
+  const when = (iso) => (iso ? new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
+
+  function renderAuto() {
+    const a = ai.auto;
+    if (!a) return;
+    const on = a.enabled;
+    $('ai-auto-badge').innerHTML = on ? '<span class="text-up font-semibold">ON</span>' : '<span class="text-slate-500">off</span>';
+    const btn = $('ai-auto-toggle');
+    btn.textContent = on ? 'Turn off' : 'Turn on auto mode';
+    btn.className = `font-semibold text-sm px-5 py-2 rounded disabled:opacity-40 ${on ? 'bg-down text-white' : 'bg-accent text-ink-950'}`;
+    btn.disabled = ai.autoBusy || (!on && !a.allowed);
+    $('ai-auto-run').classList.toggle('hidden', !on);
+    $('ai-auto-run').disabled = ai.autoBusy || a.running;
+    for (const id of ['ai-auto-symbols', 'ai-auto-interval', 'ai-auto-instruction']) $(id).disabled = on;
+    if (on && document.activeElement?.closest('#ai-auto-form') == null) {
+      $('ai-auto-symbols').value = a.symbols.join(', ');
+      $('ai-auto-interval').value = String(a.interval_min);
+      $('ai-auto-instruction').value = a.instruction;
+    }
+    let st;
+    if (!a.allowed) st = '<span class="text-amber-300">Not allowed: set AI_TRADER_AUTO=yes in .env and restart.</span>';
+    else if (a.running) st = 'Running now…';
+    else if (on) st = `Next run ${when(a.next_run)}${a.market_open ? '' : ' (market closed, waits for the open)'} · last ${when(a.last_run)}`;
+    else st = a.stopped_reason ? `Stopped: ${esc(a.stopped_reason)}` : 'Off';
+    $('ai-auto-status').innerHTML = st;
+
+    $('ai-auto-log').innerHTML = a.activity.map((e) => `
+      <div class="border border-ink-700 rounded p-2 text-[11px]">
+        <div class="text-slate-500 num">${esc(when(e.at))}${e.error ? ` · <span class="text-down">${esc(e.error)}</span>` : ''}</div>
+        ${e.placed.map((p) => `<div><span class="text-up font-semibold">Placed</span> <span class="num">${esc(p.order)}</span> <span class="text-slate-500">(${esc(p.status)})</span> · <span class="text-slate-300">${esc(p.rationale)}</span></div>`).join('')}
+        ${e.blocked.map((b) => `<div><span class="text-amber-300">Blocked</span> <span class="num">${esc(b.order)}</span> · <span class="text-slate-400">${esc(b.reason)}</span></div>`).join('')}
+        ${e.plans.map((p) => `<div class="text-slate-400">${p.symbol ? `<span class="num text-slate-300">${esc(p.symbol)}</span>: ` : ''}${esc(p.summary)}</div>`).join('')}
+      </div>`).join('') || '<div class="text-[11px] text-slate-600">No runs yet.</div>';
+  }
+
+  async function loadAuto() {
+    try { ai.auto = await call('/api/ai-trader/auto'); renderAuto(); } catch { /* keep last state */ }
+  }
+
+  async function onAutoToggle(e) {
+    e.preventDefault();
+    if (ai.autoBusy || !ai.auto) return;
+    const turnOn = !ai.auto.enabled;
+    const body = {
+      enabled: turnOn,
+      instruction: $('ai-auto-instruction').value.trim(),
+      symbols: $('ai-auto-symbols').value.split(/[\s,]+/).filter(Boolean),
+      interval_min: Number($('ai-auto-interval').value),
+    };
+    if (turnOn) {
+      if (!body.instruction) { $('ai-auto-status').innerHTML = '<span class="text-down">Describe the strategy first.</span>'; return; }
+      const L = ai.status?.limits || {};
+      const ok = await confirmDialog('Turn on auto mode', `
+        <p>Claude will trade <b>${body.symbols.length ? esc(body.symbols.join(', ')) : 'your portfolio'}</b> ${esc($('ai-auto-interval').selectedOptions[0].text.toLowerCase())} during market hours, <b>without asking you first</b>. The first run starts right away if the market is open.</p>
+        <p class="text-xs text-slate-400">Paper account only. Each order still has to pass the limits: $${fmt(L.max_order_usd, 0)} per order, ≤ ${esc(L.max_position_pct)}% of equity per position, ${esc(L.max_orders_per_day)} AI orders a day. It turns itself off after 3 failed runs or a server restart. Each run is a Claude API call per symbol.</p>`, 'buy', 'Turn on');
+      if (!ok) return;
+    }
+    ai.autoBusy = true; renderAuto();
+    try {
+      ai.auto = await call('/api/ai-trader/auto', 'POST', body);
+      if (turnOn) setTimeout(loadAuto, 3000); // pick up the first run's state
+    } catch (err) { ai.auto.stopped_reason = err.message; }
+    ai.autoBusy = false; renderAuto();
+  }
+
+  async function onRunNow() {
+    if (ai.autoBusy) return;
+    ai.autoBusy = true; ai.auto.running = true; renderAuto();
+    try {
+      ai.auto = await call('/api/ai-trader/auto/run', 'POST');
+      if (ai.auto.activity[0]?.placed.length) window.dispatchEvent(new CustomEvent('ai-trader:order'));
+      loadStatus();
+    } catch (err) {
+      ai.auto.running = false; $('ai-auto-status').innerHTML = `<span class="text-down">${esc(err.message)}</span>`;
+    }
+    ai.autoBusy = false; renderAuto();
+  }
+
   function syncSymbol() {
     // Default the focus symbol to the one in the URL (#/trade/AAPL) when the box is empty.
     const m = location.hash.match(/^#\/trade\/([^/?#]+)/);
     if (m && !$('ai-symbol').value) $('ai-symbol').value = decodeURIComponent(m[1]).toUpperCase();
-    if (location.hash.startsWith('#/trade')) loadStatus();
+    if (location.hash.startsWith('#/trade')) { loadStatus(); loadAuto(); }
   }
 
   function init() {
     if (!$('ai-trader')) return;
     $('ai-form').addEventListener('submit', onAsk);
     $('ai-result').addEventListener('click', onResultClick);
+    $('ai-auto-form').addEventListener('submit', onAutoToggle);
+    $('ai-auto-run').addEventListener('click', onRunNow);
     window.addEventListener('hashchange', syncSymbol);
     syncSymbol();
     loadStatus();
+    loadAuto();
+    let lastPlaced = 0;
+    setInterval(async () => {
+      if (document.hidden || !location.hash.startsWith('#/trade') || ai.autoBusy) return;
+      await loadAuto();
+      const placed = (ai.auto?.activity || []).reduce((n, e) => n + e.placed.length, 0);
+      if (placed !== lastPlaced) { lastPlaced = placed; window.dispatchEvent(new CustomEvent('ai-trader:order')); loadStatus(); }
+    }, 15000);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

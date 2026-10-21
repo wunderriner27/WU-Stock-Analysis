@@ -70,8 +70,25 @@ Settings (`.env`):
 | `AI_TRADER_MAX_POSITION_PCT` | `10` | Max size of a position after a buy, as % of equity |
 | `AI_TRADER_MAX_ORDERS_PER_DAY` | `5` | AI orders per market day (counter resets on server restart) |
 | `AI_TRADER_ALLOW_SHORTS` | `no` | `yes` lets AI sells exceed the shares you hold |
-| `AI_TRADER_ALLOW_LIVE` | `no` | `yes` allows AI orders on a live account |
+| `AI_TRADER_ALLOW_LIVE` | `no` | `yes` allows AI orders on a live account (manual confirm only) |
+| `AI_TRADER_AUTO` | `no` | `yes` allows auto mode (paper only) |
 | `AI_TRADER_MODEL` / `AI_TRADER_EFFORT` | `claude-opus-5-5` / `high` | Model and effort level |
+
+### Auto mode
+
+Under the AI Trader panel, **Auto mode** lets Claude trade on a schedule without a confirm click: pick up to
+5 symbols (or leave blank for your portfolio), an interval (15 min to once a day) and a strategy, then turn it on.
+Each run asks Claude for a plan per symbol and places the orders that pass every limit above; the rest are
+logged as blocked. The panel shows an activity log of each run.
+
+- Must be allowed first with `AI_TRADER_AUTO=yes` in `.env` (default `no`).
+- **Paper accounts only**, regardless of any other setting; it stops if the account is LIVE.
+- Runs only during regular market hours (Mon-Fri 9:30-16:00 ET; exchange holidays aren't detected).
+- Stops itself after 3 failed runs in a row, and is always off after a server restart.
+- Cost: one Claude API call per symbol per run.
+
+Auto mode endpoints: `GET /api/ai-trader/auto`, `POST /api/ai-trader/auto` (`{enabled, instruction, symbols, interval_min}`),
+`POST /api/ai-trader/auto/run` (run once now). Code: `app/ai_autopilot.py`.
 
 Endpoints: `GET /api/ai-trader/status`, `POST /api/ai-trader/propose`, `POST /api/ai-trader/proposals/{id}/execute`,
 `DELETE /api/ai-trader/proposals/{id}`. Code: `app/ai_trader.py`, `static/ai_trader.js`; tests: `pytest tests`.
