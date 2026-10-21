@@ -27,7 +27,8 @@ app/errors.py                   TickerNotFound (404) / RateLimited (429) / Provi
 app/indicators.py               SMA/EMA/RSI/MACD/Bollinger, signals, performance stats
 app/sentiment.py                headline sentiment tagger
 app/econ_calendar.py            upcoming US macro events
-templates/index.html, static/app.js   frontend (watchlist is saved in browser localStorage)
+app/chat.py                     stock Q&A assistant (Claude + read-only tools over the provider)
+templates/index.html, static/app.js   frontend (watchlist is saved in browser localStorage; static/chat.js = assistant panel)
 ```
 
 ## API
@@ -37,6 +38,8 @@ templates/index.html, static/app.js   frontend (watchlist is saved in browser lo
 | `GET /api/news` | Market news + sentiment, tape (SPY/QQQ/DIA/IWM/VIX), global indices, macro/rates, gainers/losers, econ calendar |
 | `GET /api/stock/{ticker}` | Quote + bid/ask/spread, 1Y OHLCV, indicator series + signals, performance, fundamentals, analyst data, news |
 | `GET /api/quotes?symbols=A,B` | Batch quotes (used by the ticker tape refresh) |
+| `GET /api/chat/status` | Whether the assistant is enabled |
+| `POST /api/chat` | Ask the assistant: `{messages: [{role, content}], symbol?}` -> `{reply, tools_used}` |
 | `GET /api/trading/status` | Whether trading is enabled, paper vs LIVE |
 | `GET /api/account` | Balances + open positions |
 | `GET /api/orders?status=open\|closed\|all` | Order history |
@@ -77,6 +80,24 @@ Endpoints: `GET /api/ai-trader/status`, `POST /api/ai-trader/propose`, `POST /ap
 `DELETE /api/ai-trader/proposals/{id}`. Code: `app/ai_trader.py`, `static/ai_trader.js`; tests: `pytest tests`.
 
 Non-critical sections (fundamentals, news, live quote) degrade to a `warnings[]` entry instead of failing the request.
+
+## Stock assistant
+
+The **Ask** button (bottom right, every page) opens a chat panel. Answers come from Claude, which
+looks up the dashboard's own data before answering: quote, indicators and signals, fundamentals,
+analyst targets, news sentiment, price history, and the market overview. If you're on a ticker
+page, it knows which symbol you mean. It is read-only and never places orders.
+
+Add your key to `.env` (get one at https://platform.claude.com):
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+# optional
+CHAT_MODEL=claude-opus-5-5   # default
+CHAT_EFFORT=medium           # low | medium | high; lower is faster and cheaper
+```
+
+Without a key the button is dimmed and the panel says how to enable it.
 
 ## Switching to Alpaca
 

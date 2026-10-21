@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from app import ai_trader, indicators, sentiment
+from app import ai_trader, chat, indicators, sentiment
 from app.econ_calendar import upcoming_events
 from app.errors import ProviderError, RateLimited
 from app.providers import MarketDataProvider, get_provider, get_trading_provider
@@ -52,6 +52,8 @@ MOVERS_UNIVERSE = [
     "KO", "PEP", "WMT", "CVX", "MRK", "ABBV", "INTC", "QCOM", "DIS", "CSCO", "PLTR", "UBER",
     "COIN", "SHOP", "MU", "BA", "GS", "CAT", "NKE", "PYPL", "SBUX", "SMCI", "ARM",
 ]
+app.include_router(chat.build_router(tape=TAPE, groups={"indices": GLOBAL_INDICES, "macro": MACRO},
+                                      movers_universe=MOVERS_UNIVERSE))
 
 
 # ---------------------------------------------------------------- error handling
