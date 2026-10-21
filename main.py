@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-from app import ai_trader, chat, indicators, sentiment
+from app import ai_autopilot, ai_trader, chat, indicators, sentiment
 from app.econ_calendar import upcoming_events
 from app.errors import ProviderError, RateLimited
 from app.providers import MarketDataProvider, get_provider, get_trading_provider
@@ -33,6 +33,7 @@ app = FastAPI(title="Market Terminal", version="1.0.0")
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 app.include_router(ai_trader.router)
+app.include_router(ai_autopilot.router)
 
 TICKER_RE = re.compile(r"^[A-Z0-9.\-^=]{1,15}$")
 TAPE = ["SPY", "QQQ", "DIA", "IWM", "^VIX"]
