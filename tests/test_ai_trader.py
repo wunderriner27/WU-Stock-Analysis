@@ -44,6 +44,10 @@ class FakeTrader:
         self.submitted.append((symbol, qty, side, type))
         return {"id": "o1", "symbol": symbol, "qty": qty, "side": side, "status": "accepted"}
 
+    async def list_orders(self, status="all", limit=50):
+        # Nothing ever fills: every submitted order stays open.
+        return [{"symbol": s, "qty": q, "filled_qty": 0, "side": side} for s, q, side, _ in self.submitted]
+
 
 def fake_claude(orders):
     plan = ai_trader.TradePlan(summary="ok", risks=["r"], orders=[ai_trader.ProposedOrder(**o) for o in orders])
@@ -120,3 +124,24 @@ def test_disabled_without_trading(env):
     env.mp.setattr(ai_trader, "get_trading_provider", lambda: None)
     assert env.client.get("/api/ai-trader/status").json()["enabled"] is False
     assert env.client.post("/api/ai-trader/propose", json={"instruction": "x"}).status_code == 501
+
+
+def test_unfilled_buys_count_toward_position_cap(env):
+    env.mp.setenv("AI_TRADER_MAX_POSITION_PCT", "0.9")  # $900 cap on $100k equity
+    a, b = propose(env, [order(qty=5), order(qty=5)])
+    assert env.client.post(f"/api/ai-trader/proposals/{a['id']}/execute").status_code == 200
+    r = env.client.post(f"/api/ai-trader/proposals/{b['id']}/execute")
+    assert r.status_code == 409 and "unfilled buys" in r.json()["detail"]
+
+
+def test_shorts_respect_position_cap(env):
+    env.mp.setenv("AI_TRADER_ALLOW_SHORTS", "yes")
+    env.mp.setenv("AI_TRADER_MAX_POSITION_PCT", "0.5")  # $500 cap; 5 MSFT held
+    ok, too_big = propose(env, [order(symbol="MSFT", side="sell", qty=9),
+                                order(symbol="MSFT", side="sell", qty=10, type="limit", limit_price=99.0)])
+    assert ok["violations"] == []  # sells 5 held + opens a $400 short
+    assert too_big["violations"] == []  # on its own it fits: sells the 5 held + a $495 short
+    assert env.client.post(f"/api/ai-trader/proposals/{ok['id']}/execute").status_code == 200
+    # The first sell is still open, so all 10 shares of the second would be short: $990 > $500.
+    r = env.client.post(f"/api/ai-trader/proposals/{too_big['id']}/execute")
+    assert r.status_code == 409 and "Short position" in r.json()["detail"]

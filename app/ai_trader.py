@@ -133,7 +133,7 @@ def _claude() -> anthropic.AsyncAnthropic:
 
 # ---------------------------------------------------------------- limit checks
 def check_order(o: dict, *, account: dict, positions: list[dict], quote: dict | None,
-                lim: Limits, placed_today: int) -> tuple[list[str], float | None]:
+                lim: Limits, placed_today: int, open_orders: list[dict] | None = None) -> tuple[list[str], float | None]:
     """Return (violations, estimated order value). An empty list means the order may be placed."""
     v: list[str] = []
     sym, side, qty = o["symbol"], o["side"], o["qty"]
@@ -163,17 +163,34 @@ def check_order(o: dict, *, account: dict, positions: list[dict], quote: dict | 
     if value > lim.max_order_usd:
         v.append(f"Order value ${value:,.2f} exceeds the ${lim.max_order_usd:,.0f} per-order limit")
     held = next((p for p in positions if p["symbol"] == sym), None)
-    held_qty = (held or {}).get("qty") or 0
+    held_qty = (held or {}).get("qty") or 0  # negative for an existing short
+    # Open orders that haven't filled yet count against the caps, so several unfilled
+    # buys can't each pass as if they were the only one.
+    pending = {"buy": 0.0, "sell": 0.0}
+    for x in open_orders or []:
+        if x.get("symbol") == sym and x.get("side") in pending:
+            pending[x["side"]] += max((x.get("qty") or 0) - (x.get("filled_qty") or 0), 0)
+    equity = account.get("equity") or 0
+    cap = equity * lim.max_position_pct / 100
     if side == "buy":
         if value > (account.get("buying_power") or 0):
             v.append("Order value exceeds buying power")
-        equity = account.get("equity") or 0
-        after = max(held_qty, 0) * ref + value
-        cap = equity * lim.max_position_pct / 100
+        after = (max(held_qty, 0) + pending["buy"]) * ref + value
         if equity <= 0 or after > cap:
-            v.append(f"Position would be ${after:,.2f}, above the {lim.max_position_pct:g}% of equity cap (${cap:,.2f})")
-    elif qty > max(held_qty, 0) and not lim.allow_shorts:
-        v.append(f"Sell of {qty} would exceed the {max(held_qty, 0):g} shares held (short selling is off)")
+            v.append(f"Position would be ${after:,.2f} including unfilled buys, above the "
+                     f"{lim.max_position_pct:g}% of equity cap (${cap:,.2f})")
+    else:
+        sellable = max(held_qty, 0) - pending["sell"]
+        short_qty = qty - max(sellable, 0)  # shares this sell would put (further) short
+        if short_qty > 0:
+            if not lim.allow_shorts:
+                v.append(f"Sell of {qty} would exceed the {max(sellable, 0):g} shares held and not already "
+                         "being sold (short selling is off)")
+            else:
+                exposure = (short_qty + max(-held_qty, 0)) * ref
+                if equity <= 0 or exposure > cap:
+                    v.append(f"Short position would be ${exposure:,.2f}, above the "
+                             f"{lim.max_position_pct:g}% of equity cap (${cap:,.2f})")
     return v, round(value, 2)
 
 
@@ -237,7 +254,8 @@ async def propose(body: ProposeIn):
     if focus and not SYMBOL_RE.match(focus):
         raise HTTPException(400, f"'{body.symbol}' is not a tradable US ticker")
 
-    account, positions = await asyncio.gather(t.get_account(), t.get_positions())
+    account, positions, open_orders = await asyncio.gather(
+        t.get_account(), t.get_positions(), t.list_orders("open", 500))
     symbols = ([focus] if focus else []) + [x["symbol"] for x in positions if x["symbol"] != focus]
     symbols = symbols[:MAX_CONTEXT_SYMBOLS]
     market = await asyncio.gather(*(_symbol_context(p, s, s == focus) for s in symbols))
@@ -247,6 +265,7 @@ async def propose(body: ProposeIn):
         "account": {k: account.get(k) for k in ("mode", "equity", "cash", "buying_power", "day_pl",
                                                  "day_pl_pct", "pattern_day_trader", "daytrade_count")},
         "positions": positions,
+        "open_orders": open_orders,
         "limits": {**asdict(lim), "orders_left_today": max(lim.max_orders_per_day - _orders_placed_today(), 0)},
         "market": market,
     }
@@ -296,7 +315,8 @@ async def propose(body: ProposeIn):
             except Exception:  # noqa: BLE001 - no quote just means the order shows as blocked
                 q = None
         violations, value = check_order(o, account=account, positions=positions, quote=q,
-                                        lim=lim, placed_today=_orders_placed_today())
+                                        lim=lim, placed_today=_orders_placed_today(),
+                                        open_orders=open_orders)
         pid = uuid.uuid4().hex
         _proposals[pid] = {"created": time.time(), "order": o}
         out_orders.append({**o, "id": pid, "est_value": value, "violations": violations,
@@ -315,13 +335,15 @@ async def execute(pid: str):
         if prop is None:
             raise HTTPException(404, "Proposal not found or expired. Ask for a fresh plan.")
         o = prop["order"]
-        account, positions = await asyncio.gather(t.get_account(), t.get_positions())
+        account, positions, open_orders = await asyncio.gather(
+            t.get_account(), t.get_positions(), t.list_orders("open", 500))
         try:
             quote = (await get_provider().get_quote(o["symbol"])).to_dict()
         except Exception:  # noqa: BLE001 - no quote blocks market orders in check_order
             quote = None
         violations, _ = check_order(o, account=account, positions=positions, quote=quote,
-                                    lim=limits(), placed_today=_orders_placed_today())
+                                    lim=limits(), placed_today=_orders_placed_today(),
+                                    open_orders=open_orders)
         if violations:
             raise HTTPException(409, "Blocked by AI trader limits: " + "; ".join(violations))
         log.info("AI ORDER %s %s %s %s tif=%s limit=%s", o["side"], o["qty"], o["symbol"], o["type"],
